@@ -44,6 +44,15 @@ WindowSearchProvider.prototype = {
         Search.SearchProvider.prototype._init.call(this, _("WINDOWS"));
     },
 
+    getResultMetas: function(ids) {
+        let metas = [];
+        for (let i = 0; i < ids.length; i++) {
+            metas.push(this.getResultMeta(ids[i]));
+        }
+        return metas;
+
+    },
+
     getResultMeta: function(resultId) {
         let apps = this.getRunningApps();
 
@@ -152,7 +161,6 @@ WindowSearchProvider.prototype = {
             }
 
         }
-
         return results;
     },
 

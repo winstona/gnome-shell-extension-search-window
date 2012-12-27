@@ -36,26 +36,27 @@ const Search = imports.ui.search;
 function WindowSearchProvider() {
     this._init();
 }
-
 WindowSearchProvider.prototype = {
     __proto__: Search.SearchProvider.prototype,
 
     _init: function() {
         Search.SearchProvider.prototype._init.call(this, _("WINDOWS"));
+        this.title = "WINDOWS";
     },
 
-    getResultMetas: function(ids) {
+    getResultMetas: function(ids, callback) {
         let metas = [];
         for (let i = 0; i < ids.length; i++) {
             metas.push(this.getResultMeta(ids[i]));
         }
-        return metas;
+        callback(metas);
 
     },
 
     getResultMeta: function(resultId) {
         let apps = this.getRunningApps();
 
+        //global.log("getresultmeta: " + JSON.stringify(resultId, null, 4));
         for (let i = 0; i < apps.length; i++) {
             let app = apps[i];
             let windows = app.get_windows();
@@ -64,10 +65,14 @@ WindowSearchProvider.prototype = {
                 let window = windows[j];
 
                 let title = app.get_name() + ' - ' + window.get_title();
+                
 
-                if (resultId == title) {
-                    return { 'id': resultId,
+                if (resultId.title == title) {
+                    return { 'id': resultId.title,
                              'name': window.get_title(),
+                             'title': window.get_title(),
+                             'extract':"None",
+                             'show_icon':resultId.show_icon,
                              'createIcon': function(size) {
                                  return app.create_icon_texture(size);
                              }
@@ -76,6 +81,7 @@ WindowSearchProvider.prototype = {
             }
         }
 
+        global.log("should never get here");
         // !mwd - should never get here!
         return { 'id': resultId,
                  'name': resultId,
@@ -133,11 +139,11 @@ WindowSearchProvider.prototype = {
 
         for (let i = 0; i < apps.length; i++) {
             let app = apps[i];
+
             let windows = app.get_windows();
 
             for (let j = 0; j < windows.length; j++) {
                 let window = windows[j];
-
                 let mtype = Search.MatchType.NONE;
 
                 let title = app.get_name() + ' - ' + window.get_title();
@@ -156,11 +162,15 @@ WindowSearchProvider.prototype = {
                     }
                 }
                 if (mtype != Search.MatchType.NONE) {
-                    results.push(title);
+                    results.push({
+                        "title": title,
+                        "show_icon": true});
                 }
             }
 
         }
+        //global.log("returning " + results.length + " results");
+        this.searchSystem.pushResults(this, results);
         return results;
     },
 
@@ -171,13 +181,21 @@ WindowSearchProvider.prototype = {
 
     getRunningApps: function() {
         return Shell.AppSystem.get_default().get_running();
-    }
+    },
+
+
 };
+
+
+
+
+
 
 let searchProvider;
 
 function init(extensionMeta) {
     searchProvider = new WindowSearchProvider();
+
 }
 
 function enable() {

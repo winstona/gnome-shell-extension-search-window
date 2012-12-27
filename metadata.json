@@ -1,1 +1,1 @@
-{"shell-version": ["3.2", "3.4.1"], "uuid": "windowsearch@line72.net", "name": "Window Search", "description": "Search active windows by title name"}
+{"shell-version": ["3.2", "3.4.1", "3.6.1", "3.6.2"], "uuid": "windowsearch@line72.net", "name": "Window Search", "description": "Search active windows by title name"}

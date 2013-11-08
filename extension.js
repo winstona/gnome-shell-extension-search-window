@@ -29,19 +29,70 @@ const Mainloop = imports.mainloop;
 const Gettext = imports.gettext.domain('gnome-shell');
 const _ = Gettext.gettext;
 const Shell = imports.gi.Shell;
-
+const Lang = imports.lang;
 const Main = imports.ui.main;
 const Search = imports.ui.search;
-
-function WindowSearchProvider() {
+const IconGrid = imports.ui.iconGrid;
+const Clutter = imports.gi.Clutter;
+const Gio = imports.gi.Gio;
+const Signals = imports.signals;
+const SearchDisplay = imports.ui.searchDisplay;
+/*function WindowSearchProvider() {
     this._init();
 }
-WindowSearchProvider.prototype = {
-    __proto__: Search.SearchProvider.prototype,
+*/
+
+let searchProvider = null;
+let injections = {};
+
+const WindowSearchIconBin = new Lang.Class({
+    Name: 'WindowSearchIconBin',
+
+    _init: function(result) {
+        this.actor = new St.Bin({ reactive: true,
+                                  track_hover: true });
+        this.icon = new IconGrid.BaseIcon(result.name,
+                                          { showLabel: true,
+                                            createIcon: Lang.bind(this, result.createIcon) } );
+
+        this.actor.child = this.icon.actor;
+        this.actor.label_actor = this.icon.label;
+    },
+
+    //not used
+    /*
+    createIcon: function (size) {
+        let box = new Clutter.Box();
+        let icon = new St.Icon({ icon_name: 'windowsearch',
+                                 icon_size: size });
+        box.add_child(icon);
+        let size = 22;
+        let emblem = new St.Icon({ icon_name: 'gnome-terminal',
+                                   icon_size: size});
+        box.add_child(emblem);
+        return box;
+    }
+    */
+});
+
+
+const WindowSearchProvider = new Lang.Class({
+    //__proto__: Search.SearchProvider.prototype,
+    Name: 'WindowSearchProvider',
+    appInfo: Gio.DesktopAppInfo.new('gnome-terminal.desktop'),
+    disableProviderIcon: 1,
 
     _init: function() {
-        Search.SearchProvider.prototype._init.call(this, _("WINDOWS"));
+        //Search.SearchProvider.prototype._init.call(this, _("WINDOWS"));
+        log("init windowsearchprovider");
         this.title = "WINDOWS";
+        this.id = "WINDOWS";
+
+    },
+
+    createResultActor: function (result, terms) {
+        let icon = new WindowSearchIconBin(result);
+        return icon.actor;
     },
 
     getResultMetas: function(ids, callback) {
@@ -56,7 +107,7 @@ WindowSearchProvider.prototype = {
     getResultMeta: function(resultId) {
         let apps = this.getRunningApps();
 
-        //global.log("getresultmeta: " + JSON.stringify(resultId, null, 4));
+        //log("getresultmeta: " + JSON.stringify(resultId, null, 4));
         for (let i = 0; i < apps.length; i++) {
             let app = apps[i];
             let windows = app.get_windows();
@@ -81,13 +132,10 @@ WindowSearchProvider.prototype = {
             }
         }
 
-        global.log("should never get here");
+        log("should never get here");
         // !mwd - should never get here!
         return { 'id': resultId,
-                 'name': resultId,
-                 'createIcon': function(size) {
-                     return null;
-                 }
+                 'name': resultId
                };
 
     },
@@ -127,7 +175,7 @@ WindowSearchProvider.prototype = {
         }
     },
 
-    getInitialResultSet: function(terms) {
+    _getResultSet: function(sessions, terms) {
         let results = [];
 
         let apps = this.getRunningApps();
@@ -144,7 +192,7 @@ WindowSearchProvider.prototype = {
 
             for (let j = 0; j < windows.length; j++) {
                 let window = windows[j];
-                let mtype = Search.MatchType.NONE;
+                let mtype = 0;
 
                 let title = app.get_name() + ' - ' + window.get_title();
                 let titleLower = String.toLowerCase(title);
@@ -152,16 +200,16 @@ WindowSearchProvider.prototype = {
                 for (let k = 0; k < terms.length; k++) {
                     let idx = titleLower.indexOf(terms[k]);
                     if (idx == 0) {
-                        mtype = Search.MatchType.PREFIX;
+                        mtype = 1;
                     } else if (idx > 0) {
-                        if (mtype == Search.MatchType.NONE)
-                            mtype = Search.MatchType.SUBSTRING;
+                        if (mtype == 0)
+                            mtype = 2;
                     } else {
-                        mtype = Search.MatchType.NONE;
+                        mtype = 0;
                         break;
                     }
                 }
-                if (mtype != Search.MatchType.NONE) {
+                if (mtype != 0) {
                     results.push({
                         "title": title,
                         "show_icon": true});
@@ -169,14 +217,18 @@ WindowSearchProvider.prototype = {
             }
 
         }
-        //global.log("returning " + results.length + " results");
+        //log("returning " + results.length + " results");
         this.searchSystem.pushResults(this, results);
         return results;
     },
 
+    getInitialResultSet: function(terms) {
+        return this._getResultSet([], terms);
+    },
+
     getSubsearchResultSet: function(previousResults, terms) {
         //!mwd - not too effecient here!
-        return this.getInitialResultSet(terms);
+        return this._getResultSet([], terms);
     },
 
     getRunningApps: function() {
@@ -184,24 +236,76 @@ WindowSearchProvider.prototype = {
     },
 
 
-};
+});
 
 
 
 
 
 
-let searchProvider;
 
 function init(extensionMeta) {
-    searchProvider = new WindowSearchProvider();
-
 }
 
 function enable() {
-    Main.overview._viewSelector.addSearchProvider(searchProvider);
+    if (!searchProvider) {
+        injections['_init'] = SearchDisplay.ListSearchResults.prototype._init;
+        injections['getResultsForDisplay'] = SearchDisplay.ListSearchResults.prototype.getResultsForDisplay;
+        
+        const MAX_LIST_SEARCH_RESULTS_ROWS = 50;
+        SearchDisplay.ListSearchResults.prototype._init = function(provider) {
+            this.provider = provider;
+
+            this.actor = new St.BoxLayout({ style_class: 'search-section-content' });
+            this.providerIcon = new SearchDisplay.ProviderIcon(provider);
+            this.providerIcon.connect('clicked', Lang.bind(this,
+                function() {
+                    provider.launchSearch(this._terms);
+                    Main.overview.toggle();
+                }));
+
+            if (!provider.disableProviderIcon) {
+                this.actor.add(this.providerIcon, { x_fill: false,
+                                                    y_fill: false,
+                                                    x_align: St.Align.START,
+                                                    y_align: St.Align.START });
+            }
+
+            this._content = new St.BoxLayout({ style_class: 'list-search-results',
+                                               vertical: true });
+            this.actor.add(this._content, { expand: true });
+
+            this._notDisplayedResult = [];
+            this._terms = [];
+            this._pendingClear = false;
+        };
+
+        //Signals.addSignalMethods(SearchDisplay.ListSearchResults.prototype);
+
+        searchProvider = new WindowSearchProvider();
+        Main.overview.addSearchProvider(searchProvider);
+
+        SearchDisplay.ListSearchResults.prototype.getResultsForDisplay =  function() {
+            let alreadyVisible = this._pendingClear ? 0 : this.getVisibleResultCount();
+            let canDisplay = MAX_LIST_SEARCH_RESULTS_ROWS - alreadyVisible;
+
+            let newResults = this._notDisplayedResult.splice(0, canDisplay);
+            return newResults;
+        };
+    }
 }
 
 function disable() {
-    Main.overview._viewSelector.removeSearchProvider(searchProvider);
+    if (searchProvider) {
+        log("removing search provder");
+        Main.overview.removeSearchProvider(searchProvider);
+        searchProvider = null;
+
+        for (prop in injections) {
+            log("removing " + prop + " override");
+            SearchDisplay.ListSearchResults.prototype[prop] = injections[prop];
+        }
+    }
 }
+
+
